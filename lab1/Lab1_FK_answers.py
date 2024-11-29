@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+from IoHelper import BvhReader
 
 def load_motion_data(bvh_file_path):
     """part2 辅助函数，读取bvh文件"""
@@ -30,9 +31,14 @@ def part1_calculate_T_pose(bvh_file_path):
     Tips:
         joint_name顺序应该和bvh一致
     """
-    joint_name = None
     joint_parent = None
     joint_offset = None
+    bvhReader = BvhReader(bvh_file_path)
+    bvhReader.parse()
+    joint_name = bvhReader.mJointNames
+    joint_offset = bvhReader.mOffsets
+    joint_parent = bvhReader.mJointParents
+
     return joint_name, joint_parent, joint_offset
 
 

@@ -32,6 +32,11 @@ class IoHelper:
         while nxtChar != ' ' and nxtChar != '\n':
             strRet = strRet + nxtChar
             nxtChar = self.fileHandler.read(1)
+            if not nxtChar :
+                if len(strRet) > 0 :
+                    return strRet
+                else:
+                    return
             self.mCurCharIdx  = self.mCurCharIdx + 1
 
         if nxtChar == '\n' :
@@ -78,6 +83,9 @@ class BvhReader:
         self.mRootStack = []
         self.mJointStack = []
         self.mJointChannels = []
+        self.mJointFrameMotionData = []
+        self.mFrameNum = 0
+        self.mFrameTime = 0
     
     def errorString(self,notErrorCondition,errorWhy):
         if notErrorCondition :
@@ -96,12 +104,20 @@ class BvhReader:
         return self.mContext.getCurToken()
 
     def next(self):
-        self.mContext.setCurToken(self.mFileReader.readNextToken())
+        nxtCh = self.mFileReader.readNextToken()
+
+        if not nxtCh:
+            return
+        self.mContext.setCurToken(nxtCh)
+
         if self.cur() == '{':
             self.addScope()
         if self.cur() == '}':
             self.decScope()
-        print(self.cur()+" ")
+
+        if __name__ == "__main__":
+            print(self.cur()+" ")
+
         return self.cur()
 
     def addScope(self):
@@ -118,23 +134,35 @@ class BvhReader:
     def parseHierarchy(self):
         self.errorString( self.cur() == "HIERARCHY" , "Bad Parse")
         self.next()
+        self.mJointStack.append(-1)
         while self.cur() == "ROOT":
             self.parseRoot()
+        self.mJointStack.pop()
             
     def parseRoot(self):
         self.errorString( self.cur() == "ROOT" , "Bad Parse")
         self.mRootStack.append(self.next()) ## RootName inside
         self.mRootName.append(self.cur())
+
+        ## 注意需要包含根节点和末端，根节点起名为RootJoint，末端起名为父节点+'_end'
+        self.mJointParents.append(self.mJointStack[-1])
+        self.mJointStack.append(len(self.mJointNames))
+        self.mJointNames.append(self.cur())
+
         self.mRootJointsIdx.append(len(self.mJointNames))
         self.errorString( self.next() == "{" , "Bad Parse")
         self.next()
         self.mRootOffset.append(self.parseOffset())
+        self.mOffsets.append(self.mRootOffset[-1])
         self.next()
         self.mRootChannels.append(self.parseChannels())
+        self.mJointChannels.append(self.mRootChannels[-1])
         self.next()
+
         while self.cur() == "JOINT":
             self.parseJoint()
             self.next()
+        self.mJointStack.pop()
         self.mRootStack.pop() ## RootName inside
 
     def parseChannels(self):
@@ -162,8 +190,9 @@ class BvhReader:
     def parseJoint(self):
         self.errorString( self.cur() == "JOINT" , "Bad Parse")
         self.next() 
+        self.mJointParents.append(self.mJointStack[-1])
+        self.mJointStack.append(len(self.mJointNames))
         self.mJointNames.append(self.cur())
-        self.mJointStack.append(self.cur())
         self.errorString( self.next() == "{" , "Bad Parse")
         self.next()
 
@@ -186,20 +215,41 @@ class BvhReader:
                 self.next()
                 offsetVec = self.parseOffset()
                 self.errorString( self.next() == '}', "Bad Parse")
+                self.mJointNames.append(self.mJointNames[-1]+"_end")
+                self.mJointParents.append(self.mJointStack[-1])
+                self.mOffsets.append(offsetVec)
+                self.mJointChannels.append([])
+
             self.next()
 
         self.errorString( self.cur() == '}',"Bad Parse")
         self.mJointStack.pop()
 
+    def parseMotion(self):
+        self.errorString(self.cur() == "MOTION","Bad Parse Motion Section")
+        self.errorString(self.next() == "Frames:" and self.is_number(self.next()),"Bad Parse Frames")
+        self.mFrameNum = int(self.cur())
+        self.errorString(self.next() == "Frame" and self.next() == "Time:" and self.is_number(self.next()),"Bad Parse Frames")
+        self.mFrameTime = float(self.cur())
+        for frameIdx in range(0,self.mFrameNum):
+            self.mJointFrameMotionData.append([])
+            for joint in range(0,len(self.mJointChannels)):
+                channelData = []
+                for channel in range(0,len(self.mJointChannels[joint])):
+                    self.errorString(self.is_number(self.next()),"Bad Parse Motion Data in Joint {self.mJointNames[joint]}" )
+                    channelData.append(float(self.cur()))
+                self.mJointFrameMotionData[frameIdx].append(channelData)
+
     def parse(self):
         ##DFA here
-        self.mRootJointsIdx.append(0) 
-        
+        self.next()
+        self.parseHierarchy()
+        self.next()
+        self.parseMotion()
 
 def main():
     reader = BvhReader(r"data/walk60.bvh")
-    reader.next()
-    reader.parseHierarchy()
+    reader.parse()
 
 if __name__ == "__main__":
     main()
