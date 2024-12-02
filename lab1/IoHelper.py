@@ -107,6 +107,7 @@ class BvhReader:
         nxtCh = self.mFileReader.readNextToken()
 
         if not nxtCh:
+            self.errorString(False,"Unexpected file early EOF")
             return
         self.mContext.setCurToken(nxtCh)
 

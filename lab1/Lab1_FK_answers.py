@@ -1,6 +1,9 @@
 import numpy as np
-from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Rotation
 from IoHelper import BvhReader
+from panda3d.core import Vec3
+from panda3d.core import Vec4
+import numpy as np
 
 def load_motion_data(bvh_file_path):
     """part2 辅助函数，读取bvh文件"""
@@ -18,7 +21,12 @@ def load_motion_data(bvh_file_path):
         motion_data = np.concatenate(motion_data, axis=0)
     return motion_data
 
+def new_load_bvh_data(bvh_file_path):
+    reader = BvhReader(bvh_file_path)
+    reader.parse()
+    return reader.mJointNames,reader.mJointParents,reader.mOffsets,reader.mJointChannels,reader.mJointFrameMotionData
 
+    
 
 def part1_calculate_T_pose(bvh_file_path):
     """请填写以下内容
@@ -41,6 +49,68 @@ def part1_calculate_T_pose(bvh_file_path):
 
     return joint_name, joint_parent, joint_offset
 
+def get_joint_pos_and_ori(joint_par_pos,joint_par_ori,joint_channels,frame_data,frame_data_offset):
+    parPos = joint_par_pos
+    if not parPos:
+        parPos = Vec3(0,0,0)
+    parOri = joint_par_ori
+    if not parPos:
+        parPos = Vec3(0,0,0)
+
+def get_rot_and_trans_and_new_offset(joint_channels,joint_motion):
+    seq = ""
+    ret_pos = Vec3(0,0,0)
+    rot_eular = Vec3()
+    data_offset = 0
+    for channel in joint_channels:
+        data = joint_motion
+        if channel == "Xposition":
+            ret_pos[0] = data[data_offset]
+        elif channel == "Yposition":
+            ret_pos[1] = data[data_offset]
+        elif channel == "Zposition":
+            ret_pos[2] = data[data_offset]
+        elif channel == "Xrotation":
+            seq += "X"
+            rot_eular[0] = data[data_offset]
+        elif channel == "Yrotation":
+            seq += "Y"
+            rot_eular[1] = data[data_offset]
+        elif channel == "Zrotation":
+            seq += "Z"
+            rot_eular[2] = data[data_offset]
+        data_offset = data_offset + 1
+    
+    if len(seq)>0:
+        ret_rot = Rotation.from_euler(seq,rot_eular,True)
+    else:
+        ret_rot = Rotation.from_quat([0,0,0,1])    
+    return ret_rot,ret_pos
+
+
+def new_part2_forward_kinematics(joint_name, joint_parent, joint_offset,joint_channels, joint_motions, frameIdx):
+    joint_positions = np.empty([len(joint_name),3],dtype=float)
+    joint_orientations = []
+    joint_orientation_quats =  np.empty([len(joint_name),4],dtype=float)
+    assert frameIdx < len(joint_motions) , "Wrong Frame index"
+    for jointIdx in range(0,len(joint_name)):
+        jointParIdx = joint_parent[jointIdx]
+        rot = Rotation.from_quat(Vec4(0,0,0,1))
+        pos = Vec3(0,0,0)
+        rot,pos = get_rot_and_trans_and_new_offset(joint_channels[jointIdx],joint_motions[frameIdx][jointIdx])
+        if jointParIdx != -1:
+            ## For Root joint
+            rot = (joint_orientations[jointParIdx] * rot)
+            ## attention : offset in JOINT is the relative offset against parent joint, so it sould be rot with parent joint quat 
+            pos = joint_positions[jointParIdx]+ joint_orientations[jointParIdx].apply(joint_offset[jointIdx])
+        else:
+            pos = Vec3(joint_offset[jointIdx]) + pos
+        joint_positions[jointIdx] = (np.array([pos[0],pos[1],pos[2]]))
+        joint_orientations.append(rot)
+        rot_quat = rot.as_quat()
+        joint_orientation_quats[jointIdx] = np.array([rot_quat[0],rot_quat[1],rot_quat[2],rot_quat[3]])
+
+    return joint_positions, joint_orientation_quats
 
 def part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data, frame_id):
     """请填写以下内容
