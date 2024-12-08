@@ -46,6 +46,10 @@ def part3_retarget(viewer, T_pose_bvh_path, A_pose_bvh_path):
     Tips:
         我们不需要T-pose bvh的动作数据，只需要其定义的骨骼模型
     """
+
+    joint_name, joint_parent, joint_offset,joint_channels,joint_motion = new_load_bvh_data(bvh_file_path)
+    frame_num = len(joint_motion)
+
     # T-pose的骨骼数据
     joint_name, joint_parent, joint_offset = part1_calculate_T_pose(T_pose_bvh_path)
     # A-pose的动作数据
@@ -72,11 +76,11 @@ def main():
 
     # 请取消注释需要运行的代码
     # part1
-    #part1(viewer, bvh_file_path)
+    # part1(viewer, bvh_file_path)
 
     # part2
-    #part2_one_pose(viewer, bvh_file_path)
-    part2_animation(viewer, bvh_file_path)
+    part2_one_pose(viewer, bvh_file_path)
+    ##part2_animation(viewer, bvh_file_path)
 
     # part3
     #part3_retarget(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
