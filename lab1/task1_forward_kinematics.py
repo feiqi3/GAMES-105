@@ -46,22 +46,20 @@ def part3_retarget(viewer, T_pose_bvh_path, A_pose_bvh_path):
     Tips:
         我们不需要T-pose bvh的动作数据，只需要其定义的骨骼模型
     """
-
-    joint_name, joint_parent, joint_offset,joint_channels,joint_motion = new_load_bvh_data(bvh_file_path)
-    frame_num = len(joint_motion)
-
     # T-pose的骨骼数据
     joint_name, joint_parent, joint_offset = part1_calculate_T_pose(T_pose_bvh_path)
     # A-pose的动作数据
     retarget_motion_data = part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path)
-
+    T_Pos_reader = BvhReader(T_pose_bvh_path)
+    T_Pos_reader.parse()
     #播放和上面完全相同
-    frame_num = retarget_motion_data.shape[0]
+    frame_num = len(retarget_motion_data)
     class UpdateHandle:
         def __init__(self):
             self.current_frame = 0
         def update_func(self, viewer_):
-            joint_positions, joint_orientations = part2_forward_kinematics(joint_name, joint_parent, joint_offset, retarget_motion_data, self.current_frame)
+            joint_positions, joint_orientations = new_part2_forward_kinematics(T_Pos_reader.mJointNames,
+                                                                                T_Pos_reader.mJointParents, T_Pos_reader.mOffsets,T_Pos_reader.mJointChannels, retarget_motion_data, self.current_frame)
             viewer.show_pose(joint_name, joint_positions, joint_orientations)
             self.current_frame = (self.current_frame + 1) % frame_num
     handle = UpdateHandle()
@@ -76,14 +74,14 @@ def main():
 
     # 请取消注释需要运行的代码
     # part1
-    # part1(viewer, bvh_file_path)
+    #part1(viewer, "data/A_pose_run.bvh")
 
     # part2
-    part2_one_pose(viewer, bvh_file_path)
-    ##part2_animation(viewer, bvh_file_path)
+    #part2_one_pose(viewer, bvh_file_path)
+    #part2_animation(viewer, "data/A_pose_run.bvh")
 
     # part3
-    #part3_retarget(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
+    part3_retarget(viewer, "data/walk60.bvh", "data/A_pose_run.bvh")
 
 
 if __name__ == "__main__":

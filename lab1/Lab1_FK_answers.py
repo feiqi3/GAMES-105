@@ -5,6 +5,7 @@ from panda3d.core import Vec3
 from panda3d.core import Vec4
 import numpy as np
 import math
+import copy
 
 def load_motion_data(bvh_file_path):
     """part2 辅助函数，读取bvh文件"""
@@ -130,20 +131,53 @@ def part2_forward_kinematics(joint_name, joint_parent, joint_offset, motion_data
     return joint_positions, joint_orientations
 
 def normalize(array_like):
-    assert(len(array_like) == 3)
     len = array_like[0] *array_like[0]   + array_like[1] * array_like[1] + array_like[2] * array_like[2]    
     len = math.sqrt(len)
+    if(len == 0):
+        return array_like
     array_like[0] = array_like[0] / len
     array_like[1] = array_like[1] / len
     array_like[2] = array_like[2] / len
     return array_like
 
 def RotFromAxistoAxis(veca,vecb):
-    veca = normalize(veca)
-    vecb = normalize(vecb)
+    if veca[0] ==  vecb[0] and veca[1] ==  vecb[1] and veca[2] == vecb[2]:
+        return  Rotation.from_quat([0,0,0,1])
+    if veca[0] == - vecb[0] and veca[1] == - vecb[1] and veca[2] == - vecb[2]:
+        return  Rotation.from_quat([veca[0],veca[1],veca[2],0])
+
     w = 1 + np.dot(veca,vecb)
-    xyz = np.cross(veca,vecb) 
+    xyz = [veca[1] * vecb[2] - vecb[1] * veca[2], veca[2]*vecb[0] - vecb[2] * veca[0],veca[0]*vecb[1] - vecb[0] * veca[1]]
+
     return Rotation.from_quat([xyz[0],xyz[1],xyz[2],w])
+
+def retargetRot(Ori_offset,Tar_offset,par_ori_to_tar_orien_delta,ori_motion_rot):
+    Ori_offset = normalize(Ori_offset)
+    Tar_offset = normalize(Tar_offset) 
+    rot_ori_to_tar = RotFromAxistoAxis(Ori_offset,Tar_offset)
+    rot_ret = par_ori_to_tar_orien_delta * ori_motion_rot * rot_ori_to_tar.inv()
+    return rot_ret
+
+def writeBackNewMotionRot(joint_channel_tar,joint_data,write_rot):
+    seq = ""
+    for channel in joint_channel_tar:
+        if channel == "Xrotation":
+            seq += "X"
+        elif channel == "Yrotation":
+            seq += "Y"
+        elif channel == "Zrotation":
+            seq += "Z"
+    eular_rot = write_rot.as_euler(seq, degrees=True)
+    data_offset = 0
+    for channel in joint_channel_tar:
+        data = joint_data
+        if channel == "Xrotation":
+            data[data_offset] = eular_rot[0]
+        elif channel == "Yrotation":
+            data[data_offset] = eular_rot[1]
+        elif channel == "Zrotation":
+            data[data_offset] = eular_rot[2]
+        data_offset = data_offset + 1
 
 def retargetRot(ori_a_to_b,joint_channels_a,joint_channel_data_a,joint_channels_b,joint_channel_data_b,cur_joint_id,par_joint_id):
     seq = ""
@@ -195,36 +229,61 @@ def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):
 
     ## Get Pos From A-Pos   
 
-    ret_motion = []
     A_pos_bvh = BvhReader(A_pose_bvh_path)
     A_pos_bvh.parse()
     T_pos_bvh = BvhReader(T_pose_bvh_path)
     T_pos_bvh.parse()
-    new_motion_data = np.copy(A_pos_bvh.mJointFrameMotionData)
-    rot_a_to_t = [Rotation.from_euler(0,0,0)]
-    for i in range(1,len(A_pos_bvh.mJointNames)):
-        assert(A_pos_bvh.mJointNames[i] == T_pos_bvh.mJointNames[i])
-        ## calc its rotation delta
-        a_rot_vec = A_pos_bvh.mOffsets[i] - A_pos_bvh.mOffsets[A_pos_bvh.mJointParents[i]]
-        a_rot_vec = normalize(a_rot_vec)
-        t_rot_vec = T_pos_bvh.mOffsets[i] - T_pos_bvh.mOffsets[T_pos_bvh.mJointParents[i]]
-        t_rot_vec = normalize(t_rot_vec)
-        orientation_a = RotFromAxistoAxis([0,1,0],a_rot_vec)
-        orientation_b = RotFromAxistoAxis([0,1,0],t_rot_vec)
-        ori_a_to_t = orientation_b * orientation_a.inv()
-        ## Q_a * R_a_to_t = Q_t 
-        rot_a_to_t.append(ori_a_to_t)
 
-        
-    A_pos_Offset = A_pos_bvh.mOffsets
-    A_pos_Par = A_pos_bvh.mJointParents
-    
-    for i in range(0,A_pos_bvh.mFrameNum):
-        frame_joint_positions, frame_joint_orientation_quats = new_part2_forward_kinematics(A_pos_bvh.mJointNames,A_pos_bvh.mJointParents,A_pos_bvh.mOffsets,A_pos_bvh.mJointChannels,A_pos_bvh.mJointFrameMotionData,i)
-        frame_motion = new_motion_data[i]
-        for j in range(0,len(frame_joint_positions)):
-            joint_data = frame_motion[j]
-            retargetRot(rot_a_to_t,T_pos_bvh.mJointChannels[j],T_pos_bvh.mJointFrameMotionData[i][j] ,A_pos_bvh.mJointChannels[j],joint_data,j,A_pos_Par[j])
+## offset实际上已经表明了骨骼的指向 --> 全局空间中的
+## 利用这个信息重定向
 
-    motion_data = new_motion_data
+    ## retarget A-pos to T-pos
+
+
+    frameNum = A_pos_bvh.mFrameNum
+
+### Match Pos-A's joint to Pos-T's joint
+    idx_tToa = []
+    assert(len(A_pos_bvh.mJointNames) == len(T_pos_bvh.mJointNames))
+    for j in range(0,len(T_pos_bvh.mJointNames)):
+        name = T_pos_bvh.mJointNames[j]
+        find = -1
+        for i in range(0,len(A_pos_bvh.mJointNames)):
+            if(A_pos_bvh.mJointNames[i] == name):
+                find = i
+                break
+        if find == -1:
+            assert(0)
+        idx_tToa.append(find)
+
+    b_retargetMode = False
+    motion_data = []
+    for frameIdx in range(0,frameNum):
+        frame_motion_data_new = []
+        par_rot_delta = Rotation.from_quat([0,0,0,1])
+        for joint in range(0,len(T_pos_bvh.mJointNames)):
+            name = T_pos_bvh.mJointNames[joint]
+            if name.endswith("_end"):
+                par_rot_delta = Rotation.from_quat([0,0,0,1])
+                frame_motion_data_new.append([])
+                continue
+            A_motion = A_pos_bvh.mJointFrameMotionData[frameIdx][idx_tToa[joint]]
+            A_channel = A_pos_bvh.mJointChannels[idx_tToa[joint]]
+            rot,pos = get_rot_and_trans_and_new_offset(A_channel,A_motion)
+            A_Offset = A_pos_bvh.mOffsets[idx_tToa[joint]]
+            T_Offset = T_pos_bvh.mOffsets[joint]
+            A_Offset = normalize(A_Offset)
+            T_Offset = normalize(T_Offset)
+            ori_delta = RotFromAxistoAxis(A_Offset,T_Offset)                
+            new_rot =par_rot_delta * rot * ori_delta.inv()
+            oldEulerROt= rot.as_euler("XYZ", degrees=True)
+            eulerROt= new_rot.as_euler("XYZ", degrees=True)
+            par_rot_delta = ori_delta
+            rot = new_rot
+            new_channel_data = copy.deepcopy(A_motion)
+            writeBackNewMotionRot(T_pos_bvh.mJointChannels[joint],new_channel_data,rot)
+            frame_motion_data_new.append(new_channel_data)
+
+        motion_data.append(frame_motion_data_new)
+
     return motion_data
