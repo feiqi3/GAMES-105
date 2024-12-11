@@ -263,24 +263,37 @@ def part3_retarget_func(T_pose_bvh_path, A_pose_bvh_path):
         par_rot_delta = Rotation.from_quat([0,0,0,1])
         for joint in range(0,len(T_pos_bvh.mJointNames)):
             name = T_pos_bvh.mJointNames[joint]
+            
+
             if name.endswith("_end"):
                 par_rot_delta = Rotation.from_quat([0,0,0,1])
                 frame_motion_data_new.append([])
+                b_retargetMode = False
                 continue
             A_motion = A_pos_bvh.mJointFrameMotionData[frameIdx][idx_tToa[joint]]
             A_channel = A_pos_bvh.mJointChannels[idx_tToa[joint]]
             rot,pos = get_rot_and_trans_and_new_offset(A_channel,A_motion)
-            A_Offset = A_pos_bvh.mOffsets[idx_tToa[joint]]
-            T_Offset = T_pos_bvh.mOffsets[joint]
-            A_Offset = normalize(A_Offset)
-            T_Offset = normalize(T_Offset)
-            ori_delta = RotFromAxistoAxis(A_Offset,T_Offset)                
-            new_rot =par_rot_delta * rot * ori_delta.inv()
-            oldEulerROt= rot.as_euler("XYZ", degrees=True)
-            eulerROt= new_rot.as_euler("XYZ", degrees=True)
+## 因为在大多数时候，pose之间的不同实际上是发生在shoulder和hip这两关节的
+## 如果不加入此限制，那么对于有多个子关节的关节会出现歧义
+            if name.endswith("Shoulder") or name.endswith("Hip") :
+                b_retargetMode = True
+            ori_delta = Rotation.from_quat([0,0,0,1])
+            new_rot = rot
+            if b_retargetMode:
+## 某个关节的全局朝向 通过观察BVH可以发现，是由其子关节的Offset决定的
+## 比如此处的A-Pos是lshoulder旋转45°，就是把其子关节的offset看作一个朝向向量，然后就能满足了...
+## 如果是拿lshoulder的offset作为朝向向量，则会发现其并没发生旋转。  
+                A_child_offset = A_pos_bvh.mOffsets[idx_tToa[joint] + 1]
+                T_child_offset = T_pos_bvh.mOffsets[joint + 1]
+                A_child_offset = normalize(A_child_offset)
+                T_child_offset = normalize(T_child_offset)
+                ori_delta = RotFromAxistoAxis(A_child_offset,T_child_offset)     
+                new_rot = par_rot_delta * rot * ori_delta.inv()
+
             par_rot_delta = ori_delta
             rot = new_rot
             new_channel_data = copy.deepcopy(A_motion)
+            # 因为朝向的改变实际上影响到的是该节点的子节点，所以
             writeBackNewMotionRot(T_pos_bvh.mJointChannels[joint],new_channel_data,rot)
             frame_motion_data_new.append(new_channel_data)
 
