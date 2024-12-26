@@ -52,7 +52,9 @@ def FABRIK_backward(ik_bone_path,path_position,target_pos):
     new_path_rot = np.zeros(len(ik_bone_path) * 4)
     new_path_rot = new_path_rot.reshape([-1,4])
     new_position[len(ik_bone_path) - 1] = target_pos
-    for i in range(len(ik_bone_path) - 1,0,-1):
+    
+    end = 0
+    for i in range(len(ik_bone_path) - 1,end,-1):
         pos_i = path_position[i]
         pos_i_1 = path_position[i - 1]
         offset = pos_i - pos_i_1
@@ -61,17 +63,24 @@ def FABRIK_backward(ik_bone_path,path_position,target_pos):
         move_dir = new_position[i - 1] - new_position[i]
         move_dir = move_dir / np.linalg.norm(move_dir)
         new_position[i - 1] = new_position[i] + move_dir * length
-        new_path_rot[i] = RotFromAxistoAxis(offset / length,-move_dir)
+        offset_norm = offset / length
+        new_path_rot[i] = RotFromAxistoAxis(offset_norm,-move_dir)
+        rot = R.from_quat(new_path_rot[i]).as_euler("XYZ",degrees=True)
 
         assert(np.isnan(new_position[i][0]) != True and np.isnan(new_position[i][1]) != True and np.isnan(new_position[i][2]) != True)
     new_path_rot[0] = np.array([0,0,0,1])
     new_position[0] = path_position[0]
+
+
     return new_position,new_path_rot
 
 def FABRIK_forward(ik_bone_path,new_path_position,path_position):
     new_path_rot = np.zeros(len(ik_bone_path) * 4)
     new_path_rot = np.reshape(new_path_rot,[-1,4])
-    for i in range(1,len(new_path_position)):
+    new_path_rot[0] = np.array([0,0,0,1])
+
+    end = len(new_path_position)
+    for i in range(1,end):
         offset = path_position[i] - path_position[i-1]
         length = np.linalg.norm(offset)
 
@@ -79,9 +88,8 @@ def FABRIK_forward(ik_bone_path,new_path_position,path_position):
         move_dir = move_dir / np.linalg.norm(move_dir)
         new_path_position[i] = new_path_position[i - 1] + move_dir * length
         new_path_rot[i] = RotFromAxistoAxis(offset/length,move_dir)
-
         assert(np.isnan(new_path_position[i][0]) != True and np.isnan(new_path_position[i][1]) != True and np.isnan(new_path_position[i][2]) != True)
-
+    
     return new_path_position,new_path_rot
 
 def ApplyFullBofyIK(path2,path,metaData,new_path_rot,new_path_pos,position,orientation):
@@ -90,20 +98,18 @@ def ApplyFullBofyIK(path2,path,metaData,new_path_rot,new_path_pos,position,orien
     new_orientation = orientation
     updated = np.zeros(new_position.shape[0])
     if len(path2) > 1:
-        new_position[path2[0]] = new_path_pos[0]
-        updated[path2[0]] = 1
-        for i in range(1,len(path2)):
-            b_apply_full_ik = True
-            joint_idx = path2[i]
-            updated[joint_idx] = 1
-            new_position[joint_idx] = new_path_pos[i]
-            assert(np.isnan(new_path_pos[i][0]) != True and np.isnan(new_path_pos[i][1]) != True and np.isnan(new_path_pos[i][2]) != True)
-            new_orientation[joint_idx] = (R.from_quat(new_orientation[joint_idx]) *new_path_rot[i].inv()).as_quat()
+        updated[path2[-1]] = 1
+        new_position[path2[-1]] = new_path_pos[len(path2) - 1]
+        for i in range(0,len(path2) - 1):
+            joint = path[i]
+            new_orientation[joint] = (R.from_quat(new_orientation[joint]) * R.from_quat(new_path_rot[i])).as_quat()                 
+            new_position[joint] = new_path_pos[i]
+            updated[joint] = 1
     for i in range(len(path2),len(path)):
         joint = path[i]
         joint_par = metaData.joint_parent[joint]
         new_position[joint] = new_path_pos[i]
-        new_orientation[joint_par] = (R.from_quat(new_orientation[joint_par]) * R.from_quat(new_path_rot[i])).as_quat()
+        new_orientation[joint_par] = (R.from_quat(new_path_rot[i]) * R.from_quat(new_orientation[joint_par])).as_quat()
         updated[joint] = 1
     updated[path[-1]] = 1
 
@@ -118,11 +124,15 @@ def ApplyFullBofyIK(path2,path,metaData,new_path_rot,new_path_pos,position,orien
                     a = 3
                 offset = (position[joint] - position[joint_par]) 
                 offsetInitial = metaData.joint_initial_position[joint] - metaData.joint_initial_position[joint_par]
-                offsetInitialNorm = offsetInitial / np.linalg.norm(offsetInitial)
                 offset = offset / np.linalg.norm(offset)
-                rot =R.from_quat(RotFromAxistoAxis(offsetInitialNorm,offset))
-                new_orientation[joint] = (R.from_quat(new_orientation[joint_par]) * rot).as_quat()
                 new_position[joint] = new_position[joint_par] + R.from_quat(new_orientation[joint_par]).apply(offsetInitial)
+                new_offset = new_position[joint] - new_position[joint_par]
+                new_offset = new_offset / np.linalg.norm(new_offset)
+                #根据新的位置，计算当前joint的朝向
+                rot_new = R.from_quat(RotFromAxistoAxis(offset,new_offset))
+
+                new_orientation[joint] = (rot_new * R.from_quat(new_orientation[joint])).as_quat()
+                updated[joint] = 1
             else:
                 continue
 
@@ -137,10 +147,14 @@ def FABRIK(meta_data, joint_positions, joint_orientations, target_pose,path,path
         path_position,path_orientation = getHeuristicIkDataPath(path,ik_joint_pos,ik_joint_ori)
         step = step + 1
         new_path_pos,new_path_rot = FABRIK_backward(path,path_position,target_pose)
+        #if debug :
+        #    return ApplyFullBofyIK(path2,path,meta_data,new_path_rot,new_path_pos,joint_positions,ik_joint_ori,True)
         new_path_pos,new_path_rot = FABRIK_forward(path,new_path_pos,path_position)
+        #if debug:
+        #    return ApplyFullBofyIK(path2,path,meta_data,new_path_rot,new_path_pos,ik_joint_pos,ik_joint_ori,debug)
         ik_joint_pos,ik_joint_ori = ApplyFullBofyIK(path2,path,meta_data,new_path_rot,new_path_pos,joint_positions,ik_joint_ori)
         delta = np.linalg.norm(target_pose - ik_joint_pos[path[-1]])
-        if delta < 0.01 or step == 5 :
+        if delta < 0.01 or step == 1 :
             return ik_joint_pos,ik_joint_ori
     return  joint_positions,joint_orientations
         
@@ -162,15 +176,6 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
     print(path1)
     print(path2)
     print(path_name)
-    #offset = joint_positions[path[-1]] - joint_positions[path[-2]]
-    #lenth = np.linalg.norm(offset)
-    #vec = target_pose - joint_positions[path[-2]]
-    #vec = vec / np.linalg.norm(vec)
-    #rot = RotFromAxistoAxis(offset/lenth,vec)
-    #joint_orientations[path[-2]] = (R.from_quat(joint_orientations[path[-2]]) * R.from_quat(rot)).as_quat()
-    
-    #joint_positions[path[-1]] = joint_positions[path[-2]] + R.from_quat(joint_orientations[path[-2]]).apply(offset)
-    #joint_orientations[path[-2]] = (R.from_quat(joint_orientations[path[-2]]) * R.from_euler("XYZ",[0,-45,0],degrees=True)).as_quat()
     return FABRIK(meta_data,joint_positions,joint_orientations,target_pose,path,path1,path2)
     
 
