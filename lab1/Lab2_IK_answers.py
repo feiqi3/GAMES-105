@@ -97,6 +97,8 @@ def ApplyFullBofyIK(path2,path,metaData,new_path_rot,new_path_pos,position,orien
     new_position = copy.deepcopy(position)
     new_orientation = orientation
     updated = np.zeros(new_position.shape[0])
+    last_rot = R.from_quat(new_orientation[path[-1]]) * R.from_quat(new_orientation[path[-2]]).inv()
+    last_rot_e = last_rot.as_euler("XYZ",degrees= True)
     if len(path2) > 1:
         updated[path2[-1]] = 1
         new_position[path2[-1]] = new_path_pos[len(path2) - 1]
@@ -111,8 +113,7 @@ def ApplyFullBofyIK(path2,path,metaData,new_path_rot,new_path_pos,position,orien
         new_position[joint] = new_path_pos[i]
         new_orientation[joint_par] = (R.from_quat(new_path_rot[i]) * R.from_quat(new_orientation[joint_par])).as_quat()
         updated[joint] = 1
-    updated[path[-1]] = 1
-
+    new_orientation[path[-1]] = (last_rot *R.from_quat(new_orientation[path[-2]]) ).as_quat()
     if b_apply_full_ik:
         ## 根据initial pos， 计算原来的rotation，应用新的ik信息
         for joint in range(0,len(position)):
@@ -120,7 +121,7 @@ def ApplyFullBofyIK(path2,path,metaData,new_path_rot,new_path_pos,position,orien
                 continue
             joint_par = metaData.joint_parent[joint]
             if joint_par != -1:
-                if metaData.joint_name[joint] == "rTorso_Clavicle":
+                if metaData.joint_name[joint] == "lWrist_end":
                     a = 3
                 offset = (position[joint] - position[joint_par]) 
                 offsetInitial = metaData.joint_initial_position[joint] - metaData.joint_initial_position[joint_par]
@@ -154,7 +155,7 @@ def FABRIK(meta_data, joint_positions, joint_orientations, target_pose,path,path
         #    return ApplyFullBofyIK(path2,path,meta_data,new_path_rot,new_path_pos,ik_joint_pos,ik_joint_ori,debug)
         ik_joint_pos,ik_joint_ori = ApplyFullBofyIK(path2,path,meta_data,new_path_rot,new_path_pos,joint_positions,ik_joint_ori)
         delta = np.linalg.norm(target_pose - ik_joint_pos[path[-1]])
-        if delta < 0.01 or step == 1 :
+        if delta < 0.01 or step == 2 :
             return ik_joint_pos,ik_joint_ori
     return  joint_positions,joint_orientations
         
@@ -173,9 +174,6 @@ def part1_inverse_kinematics(meta_data, joint_positions, joint_orientations, tar
         joint_orientations: 计算得到的关节朝向，是一个numpy数组，shape为(M, 4)，M为关节数
     """
     path, path_name, path1, path2 = meta_data.get_path_from_root_to_end()
-    print(path1)
-    print(path2)
-    print(path_name)
     return FABRIK(meta_data,joint_positions,joint_orientations,target_pose,path,path1,path2)
     
 
@@ -183,8 +181,10 @@ def part2_inverse_kinematics(meta_data, joint_positions, joint_orientations, rel
     """
     输入lWrist相对于RootJoint前进方向的xz偏移，以及目标高度，IK以外的部分与bvh一致
     """
-    
-    return joint_positions, joint_orientations
+    targetPos = np.array([relative_x,0,relative_z])
+    targetPos = targetPos + joint_positions[0]
+    targetPos[1] = target_height
+    return part1_inverse_kinematics(meta_data,joint_positions,joint_orientations,targetPos)
 
 def bonus_inverse_kinematics(meta_data, joint_positions, joint_orientations, left_target_pose, right_target_pose):
     """
