@@ -77,6 +77,18 @@ position, rotation表示局部平移和旋转
 translation, orientation表示全局平移和旋转
 '''
 
+def RotFromAxistoAxis(veca,vecb):
+    if veca[0] ==  vecb[0] and veca[1] ==  vecb[1] and veca[2] == vecb[2]:
+        return  R.from_quat([0,0,0,1])
+    if veca[0] == - vecb[0] and veca[1] == - vecb[1] and veca[2] == - vecb[2]:
+        return  R.from_quat([veca[0],veca[1],veca[2],0])
+    veca = veca / np.linalg.norm(veca)
+    vecb = vecb / np.linalg.norm(vecb)
+    w = 1 + np.dot(veca,vecb)
+    xyz = [veca[1] * vecb[2] - vecb[1] * veca[2], veca[2]*vecb[0] - vecb[2] * veca[0],veca[0]*vecb[1] - vecb[0] * veca[1]]
+
+    return R.from_quat([xyz[0],xyz[1],xyz[2],w])
+
 class BVHMotion():
     def __init__(self, bvh_file_name = None) -> None:
         
@@ -205,10 +217,13 @@ class BVHMotion():
         输入: rotation 形状为(4,)的ndarray, 四元数旋转
         输出: Ry, Rxz，分别为绕y轴的旋转和转轴在xz平面的旋转，并满足R = Ry * Rxz
         '''
-        Ry = np.zeros_like(rotation)
-        Rxz = np.zeros_like(rotation)
         # TODO: 你的代码
-        
+        Ay = np.array([0,1,0])
+        Ay_p = rotation.apply(Ay)
+        rot = RotFromAxistoAxis(Ay_p,Ay)
+        Ry = rot * rotation
+        Rxz = rotation * Ry.inv()
+
         return Ry, Rxz
     
     # part 1
@@ -232,6 +247,20 @@ class BVHMotion():
         offset = target_translation_xz - res.joint_position[frame_num, 0, [0,2]]
         res.joint_position[:, 0, [0,2]] += offset
         # TODO: 你的代码
+
+        ## 使第frame_num帧的根节点平移为target_translation_xz, 水平面朝向为target_facing_direction_xz
+        orientation_ = res.joint_rotation[frame_num][0]
+        Ry,Rxz = self.decompose_rotation_with_yaxis(R.from_quat(orientation_))
+
+        new_dir =np.array([target_facing_direction_xz[0],0,target_facing_direction_xz[1]])
+
+        new_ori = RotFromAxistoAxis([0,0,1],new_dir)
+        delta_rot = Ry.inv() * new_ori
+
+        for i in res.joint_rotation : 
+            root_rot = R.from_quat(i[0]) * delta_rot
+            i[0] = root_rot.as_quat();
+
         return res
 
 # part2
@@ -250,7 +279,16 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
     res.joint_rotation[...,3] = 1.0
 
     # TODO: 你的代码
-    
+    n3 =len(alpha)
+    b1_beg = bvh_motion1.joint_position.shape[0] - n3
+    b2_beg = 0
+
+    for i in range(0,n3):
+        b1_idx = b1_beg + i
+        b2_idx = b2_beg + i
+        for j in range(0,res.joint_position.shape[1]):
+            res.joint_position[i][j] = bvh_motion1.joint_position[b1_idx][j] * alpha[i] + (1 - alpha[i]) * bvh_motion2.joint_position[b2_idx][j]
+            res.joint_rotation[i][j] = bvh_motion1.joint_rotation[b1_idx][j] * alpha[i] + (1 - alpha[i]) * bvh_motion2.joint_rotation[b2_idx][j]
     return res
 
 # part3
