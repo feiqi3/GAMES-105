@@ -249,18 +249,19 @@ class BVHMotion():
         # TODO: 你的代码
 
         ## 使第frame_num帧的根节点平移为target_translation_xz, 水平面朝向为target_facing_direction_xz
-        orientation_ = res.joint_rotation[frame_num][0]
-        Ry,Rxz = self.decompose_rotation_with_yaxis(R.from_quat(orientation_))
+        old_ori = res.joint_rotation[frame_num][0]
+        Ry,Rxz = self.decompose_rotation_with_yaxis(R.from_quat(old_ori))
 
         new_dir =np.array([target_facing_direction_xz[0],0,target_facing_direction_xz[1]])
-
-        new_ori = RotFromAxistoAxis([0,0,1],new_dir)
-        delta_rot = Ry.inv() * new_ori
-
+        delta_rot = RotFromAxistoAxis(Ry.apply([0,0,1]),new_dir)
         for i in res.joint_rotation : 
             root_rot = R.from_quat(i[0]) * delta_rot
             i[0] = root_rot.as_quat();
-
+        offset_center = res.joint_position[frame_num, 0, [0,2]]
+        res.joint_position[:, 0, [0,2]] -= offset_center
+        for i in res.joint_position : 
+            i[0] = delta_rot.apply(i[0])
+        res.joint_position[:, 0, [0,2]] += offset_center
         return res
 
 # part2
@@ -280,15 +281,16 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
 
     # TODO: 你的代码
     n3 =len(alpha)
-    b1_beg = bvh_motion1.joint_position.shape[0] - n3
-    b2_beg = 0
-
+    b1_len = bvh_motion1.joint_position.shape[0]
+    b2_len = bvh_motion2.joint_position.shape[0]
+    step = 1. / n3
     for i in range(0,n3):
-        b1_idx = b1_beg + i
-        b2_idx = b2_beg + i
+        b1_idx =int(i * step * b1_len)
+        b2_idx =int(i * step * b2_len)
         for j in range(0,res.joint_position.shape[1]):
             res.joint_position[i][j] = bvh_motion1.joint_position[b1_idx][j] * alpha[i] + (1 - alpha[i]) * bvh_motion2.joint_position[b2_idx][j]
-            res.joint_rotation[i][j] = bvh_motion1.joint_rotation[b1_idx][j] * alpha[i] + (1 - alpha[i]) * bvh_motion2.joint_rotation[b2_idx][j]
+            slerp = Slerp([0,1],R.from_quat( [bvh_motion1.joint_rotation[b1_idx][j], bvh_motion2.joint_rotation[b2_idx][j]]))
+            res.joint_rotation[i][j] = slerp(alpha[i]).as_quat()
     return res
 
 # part3
