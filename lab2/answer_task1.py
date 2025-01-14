@@ -290,7 +290,7 @@ def blend_two_motions(bvh_motion1, bvh_motion2, alpha):
         for j in range(0,res.joint_position.shape[1]):
             res.joint_position[i][j] = bvh_motion1.joint_position[b1_idx][j] * alpha[i] + (1 - alpha[i]) * bvh_motion2.joint_position[b2_idx][j]
             slerp = Slerp([0,1],R.from_quat( [bvh_motion1.joint_rotation[b1_idx][j], bvh_motion2.joint_rotation[b2_idx][j]]))
-            res.joint_rotation[i][j] = slerp(alpha[i]).as_quat()
+            res.joint_rotation[i][j] = slerp(1 - alpha[i]).as_quat()
     return res
 
 # part3
@@ -316,12 +316,44 @@ def concatenate_two_motions(bvh_motion1, bvh_motion2, mix_frame1, mix_time):
     Tips:
         你可能需要用到BVHMotion.sub_sequence 和 BVHMotion.append
     '''
-    res = bvh_motion1.raw_copy()
     
     # TODO: 你的代码
-    # 下面这种直接拼肯定是不行的(
-    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], bvh_motion2.joint_position], axis=0)
-    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], bvh_motion2.joint_rotation], axis=0)
+
+    bvh_motion1 = bvh_motion1.translation_and_rotation(-1,[0,0],[0,90])
+    res = bvh_motion1.raw_copy()
+    bvh_mix_frame_pos = bvh_motion1.joint_position[mix_frame1,0,[0,2]]
+    bvh_mix_frame_rot = [0,90]
+
+    blend_motion_clip1 = BVHMotion()
+    blend_motion_clip1.joint_position = bvh_motion1.joint_position[mix_frame1 : mix_frame1 + mix_time]
+    blend_motion_clip1.joint_rotation = bvh_motion1.joint_rotation[mix_frame1 : mix_frame1 + mix_time]
+
+
+    bvh_motion2 = bvh_motion2.translation_and_rotation(0,bvh_mix_frame_pos,bvh_mix_frame_rot)
+##简单修正    
+    new_bvh_mix_frame_pos = bvh_motion2.joint_position[-1,0,[0,2]]
+    new_bvh_mix_frame_pos[0] = bvh_mix_frame_pos[0]
+    bvh_motion2 = bvh_motion2.translation_and_rotation(-1,new_bvh_mix_frame_pos,bvh_mix_frame_rot)
+
+    blend_motion_clip2 = BVHMotion()
+    blend_motion_clip2.joint_position = bvh_motion2.joint_position[0 : mix_time]
+    blend_motion_clip2.joint_rotation = bvh_motion2.joint_rotation[0 : mix_time]
+
+    alpha = np.zeros(mix_time)
+
+    for i in range(0,mix_time):
+        x = (i) / (mix_time - 1)
+        alpha[i] = (x - 1) ** 2
+
+    blend_clip = blend_two_motions(blend_motion_clip1,blend_motion_clip2,alpha)
+    #res.joint_position = np.concatenate([res.joint_position[:mix_frame1], blend_clip.joint_position[:]], axis=0)
+    #res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], blend_clip.joint_rotation[:]], axis=0)
+    res.joint_position = np.concatenate([res.joint_position[:mix_frame1], blend_clip.joint_position[:]], axis=0)
+    res.joint_rotation = np.concatenate([res.joint_rotation[:mix_frame1], blend_clip.joint_rotation[:]], axis=0)
     
+    res.joint_position = np.concatenate([res.joint_position[:], bvh_motion2.joint_position[mix_time:]], axis=0)
+    res.joint_rotation = np.concatenate([res.joint_rotation[:], bvh_motion2.joint_rotation[mix_time:]], axis=0)
+    
+
     return res
 

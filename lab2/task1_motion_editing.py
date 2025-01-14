@@ -137,9 +137,9 @@ def main():
     
     #part1_translation_and_rotation(viewer, 2) # 数字代表不同的测试setting
     
-    part2_interpolate(viewer, 2.5) # 数字代表不同期望的前进速度
-    # part3_build_loop(viewer)
-    # part4_concatenate(viewer, 0) # 数字代表不同的测试setting
+    #part2_interpolate(viewer, 2.5) # 数字代表不同期望的前进速度
+    #part3_build_loop(viewer)
+    part4_concatenate(viewer, 0) # 数字代表不同的测试setting
     viewer.run()
     
 if __name__ == '__main__':
